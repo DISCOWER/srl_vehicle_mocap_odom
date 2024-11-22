@@ -12,7 +12,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
     ],
     install_requires=[
-        'setuptools'
+        'setuptools',
+        'pyquaternion',
     ],
     zip_safe=True,
     maintainer='e-krantz',
