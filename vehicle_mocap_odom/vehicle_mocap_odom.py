@@ -4,9 +4,21 @@ from px4_msgs.msg import VehicleOdometry, VehicleAttitude, VehicleLocalPosition
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
-import numpy as np
 
-from pyquaternion import Quaternion
+try:
+    import numpy as np
+    from pyquaternion import Quaternion
+except ImportError:
+    print("pyquaternion not found. Installing it now...")
+    import subprocess, sys
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "pyquaternion"])
+        from pyquaternion import Quaternion
+        print("pyquaternion successfully installed.")
+    except Exception as e:
+        print(f"Failed to install pyquaternion: {e}")
+        sys.exit(1)
 
 
 def vector2PoseMsg(frame_id, position, attitude):
