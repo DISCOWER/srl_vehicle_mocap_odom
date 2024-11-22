@@ -23,7 +23,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'vehicle_mocap_odom = vehicle_mocap_odom.vehicle_mocap_odom:main',
+            'vehicle_mocap_odom_node = vehicle_mocap_odom.vehicle_mocap_odom:main',
         ],
     },
 )
