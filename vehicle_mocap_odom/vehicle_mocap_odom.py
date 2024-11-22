@@ -4,6 +4,7 @@ from px4_msgs.msg import VehicleOdometry, VehicleAttitude, VehicleLocalPosition
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
+import socket, re
 
 try:
     import numpy as np
@@ -37,35 +38,55 @@ def vector2PoseMsg(frame_id, position, attitude):
 class MyPublisher(Node):
 
     def __init__(self):
-        super().__init__('my_publisher')
+        super().__init__('vehicle_mocap_odom')
+        self.running_simulation = self.get_parameter_or('simulated', False)
+        namespace = "orion" if self.running_simulation else socket.gethostname()
+        namespace = re.sub(r'[^a-zA-Z0-9_~{}]', '_', namespace)
+        
+        # Create publishers and subscribers
         qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
             durability=QoSDurabilityPolicy.RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL,
             history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
             depth=1
         )
-
-        self.running_simulation = self.get_parameter_or('simulated', False)
-        self.publisher_ = self.create_publisher(VehicleOdometry, '/fmu/in/vehicle_visual_odometry', qos_profile)
+        self.publisher_ = self.create_publisher(VehicleOdometry,
+            f"/{namespace}/fmu/in/vehicle_visual_odometry",
+            qos_profile
+        )
         if self.running_simulation:
-            self.sub_1 = self.create_subscription(PoseStamped, '/orion/loc/truth/pose', self.pose_cb, 1)
-            self.sub_2 = self.create_subscription(TwistStamped, '/orion/loc/truth/twist', self.twist_cb, 1)
+            self.sub_1 = self.create_subscription(PoseStamped,
+                f"/{namespace}/loc/truth/pose",
+                self.pose_cb,
+                1
+            )
+            self.sub_2 = self.create_subscription(TwistStamped,
+                f"/{namespace}/loc/truth/twist",
+                self.twist_cb,
+                1
+            )
         else:
-            self.sub_1 = self.create_subscription(Odometry, '/pop/odom', self.odom_cb, 1)
+            self.sub_1 = self.create_subscription(Odometry,
+                f"/{namespace}/odom",
+                self.odom_cb,
+                1
+            )
             self.attitude_sub = self.create_subscription(
                 VehicleAttitude,
-                "/fmu/out/vehicle_attitude",
+                f"/{namespace}/fmu/out/vehicle_attitude",
                 self.vehicle_attitude_callback,
                 qos_profile,
             )
             self.local_position_sub = self.create_subscription(
                 VehicleLocalPosition,
-                "/fmu/out/vehicle_local_position",
+                f"/{namespace}/fmu/out/vehicle_local_position",
                 self.vehicle_local_position_callback,
-                qos_profile,
+                qos_profile
             )
             self.vehicle_pose_pub = self.create_publisher(
-                PoseStamped, "/mocap_log/vehicle_pose", 10
+                PoseStamped,
+                f"/{namespace}/mocap_log/vehicle_pose",
+                10
             )
 
         timer_period = 0.01  # seconds
