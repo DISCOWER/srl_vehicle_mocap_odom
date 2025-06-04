@@ -8,7 +8,6 @@ import socket, re
 import numpy as np
 
 class MyPublisher(Node):
-
     def __init__(self):
         super().__init__('vehicle_mocap_odom')
         namespace = self.declare_parameter('namespace', '').value
@@ -35,6 +34,11 @@ class MyPublisher(Node):
             f"/{namespace}/fmu/in/vehicle_visual_odometry",
             qos_profile_pub
         )
+        self.vehicle_pose_pub = self.create_publisher(
+            PoseStamped,
+            f"/{namespace}/mocap_log/vehicle_pose",
+            10
+        )
         
         self.odom_sub = self.create_subscription(Odometry,
             f"/{namespace}/odom",
@@ -52,11 +56,6 @@ class MyPublisher(Node):
             f"/{namespace}/fmu/out/vehicle_local_position",
             self.vehicle_local_position_callback,
             qos_profile_sub
-        )
-        self.vehicle_pose_pub = self.create_publisher(
-            PoseStamped,
-            f"/{namespace}/mocap_log/vehicle_pose",
-            10
         )
 
         timer_period = 0.01  # seconds
@@ -83,10 +82,9 @@ class MyPublisher(Node):
             msg.pose_frame = VehicleOdometry.POSE_FRAME_NED
             msg.velocity_frame = VehicleOdometry.POSE_FRAME_NED
 
-            # NED pose (pose from odom is in ENU frame and must be converted to NED for PX4)
+            # Convert Odom pose from ENU to NED and publish
             msg.position = [self.pose.position.y, self.pose.position.x, -self.pose.position.z]
-            q_enu = [self.pose.orientation.w, self.pose.orientation.x, self.pose.orientation.y, self.pose.orientation.z]
-            q_ned = self.q_enu_to_q_ned(q_enu)
+            q_ned = self.q_enu_to_q_ned([self.pose.orientation.w, self.pose.orientation.x, self.pose.orientation.y, self.pose.orientation.z])
             msg.q = [q_ned[0], q_ned[1], q_ned[2], q_ned[3]]
             msg.velocity = [self.twist.linear.y, self.twist.linear.x, -self.twist.linear.z]
             msg.angular_velocity = [self.twist.angular.y, self.twist.angular.x, -self.twist.angular.z]
