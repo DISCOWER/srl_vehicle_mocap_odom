@@ -20,7 +20,6 @@ setup(
     maintainer_email='eliaskra@kth.se',
     description='TODO: Package description',
     license='TODO: License declaration',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'vehicle_mocap_odom_node = vehicle_mocap_odom.vehicle_mocap_odom:main',

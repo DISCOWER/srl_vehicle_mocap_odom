@@ -5,93 +5,60 @@ from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 import socket, re
-
-try:
-    import numpy as np
-    from pyquaternion import Quaternion
-except ImportError:
-    print("pyquaternion not found. Installing it now...")
-    import subprocess, sys
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pyquaternion"])
-        from pyquaternion import Quaternion
-        print("pyquaternion successfully installed.")
-    except Exception as e:
-        print(f"Failed to install pyquaternion: {e}")
-        sys.exit(1)
-
-
-def vector2PoseMsg(frame_id, position, attitude):
-    pose_msg = PoseStamped()
-    # msg.header.stamp = Clock().now().nanoseconds / 1000
-    pose_msg.header.frame_id = frame_id
-    pose_msg.pose.orientation.w = attitude[0]
-    pose_msg.pose.orientation.x = attitude[1]
-    pose_msg.pose.orientation.y = attitude[2]
-    pose_msg.pose.orientation.z = attitude[3]
-    pose_msg.pose.position.x = position[0]
-    pose_msg.pose.position.y = position[1]
-    pose_msg.pose.position.z = position[2]
-    return pose_msg
+import numpy as np
 
 class MyPublisher(Node):
-
     def __init__(self):
         super().__init__('vehicle_mocap_odom')
-        self.running_simulation = self.get_parameter_or('simulated', False)
-        namespace = "orion" if self.running_simulation else socket.gethostname()
-        namespace = re.sub(r'[^a-zA-Z0-9_~{}]', '_', namespace)
+        namespace = self.declare_parameter('namespace', '').value
+        if namespace == '':
+            namespace = socket.gethostname()
+            namespace = re.sub(r'[^a-zA-Z0-9_~{}]', '_', namespace)        
         
-        # Create publishers and subscribers
-        qos_profile = QoSProfile(
-            reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
-            durability=QoSDurabilityPolicy.RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL,
-            history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
-            depth=1
+        # QoS profiles
+        qos_profile_pub = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=0
         )
+
+        qos_profile_sub = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=0
+        )
+
         self.publisher_ = self.create_publisher(VehicleOdometry,
             f"/{namespace}/fmu/in/vehicle_visual_odometry",
-            qos_profile
+            qos_profile_pub
         )
-        if self.running_simulation:
-            self.sub_1 = self.create_subscription(PoseStamped,
-                f"/{namespace}/loc/truth/pose",
-                self.pose_cb,
-                1
-            )
-            self.sub_2 = self.create_subscription(TwistStamped,
-                f"/{namespace}/loc/truth/twist",
-                self.twist_cb,
-                1
-            )
-        else:
-            self.sub_1 = self.create_subscription(Odometry,
-                f"/{namespace}/odom",
-                self.odom_cb,
-                1
-            )
-            self.attitude_sub = self.create_subscription(
-                VehicleAttitude,
-                f"/{namespace}/fmu/out/vehicle_attitude",
-                self.vehicle_attitude_callback,
-                qos_profile,
-            )
-            self.local_position_sub = self.create_subscription(
-                VehicleLocalPosition,
-                f"/{namespace}/fmu/out/vehicle_local_position",
-                self.vehicle_local_position_callback,
-                qos_profile
-            )
-            self.vehicle_pose_pub = self.create_publisher(
-                PoseStamped,
-                f"/{namespace}/mocap_log/vehicle_pose",
-                10
-            )
+        self.vehicle_pose_pub = self.create_publisher(
+            PoseStamped,
+            f"/{namespace}/mocap_log/vehicle_pose",
+            10
+        )
+        
+        self.odom_sub = self.create_subscription(Odometry,
+            f"/{namespace}/odom",
+            self.odom_cb,
+            10
+        )
+        self.attitude_sub = self.create_subscription(
+            VehicleAttitude,
+            f"/{namespace}/fmu/out/vehicle_attitude",
+            self.vehicle_attitude_callback,
+            qos_profile_sub,
+        )
+        self.local_position_sub = self.create_subscription(
+            VehicleLocalPosition,
+            f"/{namespace}/fmu/out/vehicle_local_position",
+            self.vehicle_local_position_callback,
+            qos_profile_sub
+        )
 
         timer_period = 0.01  # seconds
-        self.got_pose = False
-        self.got_twist = False
         self.got_odom = False
         self.pose = PoseStamped()
         self.twist = TwistStamped()
@@ -102,8 +69,7 @@ class MyPublisher(Node):
         self.timer = self.create_timer(timer_period, self.publish_message)
 
     def publish_message(self):
-
-        if (self.got_pose and self.got_twist) or (self.got_odom):
+        if self.got_odom:
             msg = VehicleOdometry()
 
             # Set time
@@ -116,62 +82,66 @@ class MyPublisher(Node):
             msg.pose_frame = VehicleOdometry.POSE_FRAME_NED
             msg.velocity_frame = VehicleOdometry.POSE_FRAME_NED
 
-            # NED pose
-            msg.position = [self.pose.pose.position.x, -self.pose.pose.position.y, -self.pose.pose.position.z]
+            # Convert Odom pose from ENU to NED and publish
+            msg.position = [self.pose.position.y, self.pose.position.x, -self.pose.position.z]
+            q_ned = self.q_enu_to_q_ned([self.pose.orientation.w, self.pose.orientation.x, self.pose.orientation.y, self.pose.orientation.z])
+            msg.q = [q_ned[0], q_ned[1], q_ned[2], q_ned[3]]
+            msg.velocity = [self.twist.linear.y, self.twist.linear.x, -self.twist.linear.z]
+            msg.angular_velocity = [self.twist.angular.y, self.twist.angular.x, -self.twist.angular.z]
 
-            att_q = Quaternion(self.pose.pose.orientation.w, self.pose.pose.orientation.x, self.pose.pose.orientation.y, self.pose.pose.orientation.z)
-            # msg.q = self.rotateQuaternion(Quaternion(att_q))
-            msg.q = [att_q.w, att_q.x, -att_q.y, -att_q.z]
-            #msg.velocity = [self.twist.twist.linear.x, -self.twist.twist.linear.y, -self.twist.twist.linear.z]
-            #msg.angular_velocity = [self.twist.twist.angular.x, -self.twist.twist.angular.y, -self.twist.twist.angular.z]
-            msg.velocity = [float('nan'), float('nan'), float('nan')]
-            msg.angular_velocity = [float('nan'), float('nan'), float('nan')]
             self.publisher_.publish(msg)
 
             # Log vehicle local position
-            vehicle_pose_msg = vector2PoseMsg(
+            vehicle_pose_msg = self.vector2PoseMsg(
                 "mocap", self.vehicle_local_position, self.vehicle_attitude
             )
             self.vehicle_pose_pub.publish(vehicle_pose_msg)
 
-    def rotateQuaternion(self, q_FLU_to_ENU):
-        # quats are w x y z
-        q_FLU_to_FRD = Quaternion(0, 1, 0, 0)
-        # q_ENU_to_NED = Quaternion(0, 0.70711, 0.70711, 0)
-
-        # q_rot = q_ENU_to_NED * q_FLU_to_ENU * q_FLU_to_FRD.inverse
-        q_rot = q_FLU_to_ENU * q_FLU_to_FRD.inverse
-        return [q_rot.w, q_rot.x, q_rot.y, q_rot.z]
-
-    def pose_cb(self, msg):
-        self.pose = msg
-        self.got_pose = True
-
-    def twist_cb(self, msg):
-        self.twist = msg
-        self.got_twist = True
-
-    def odom_cb(self, msg):
-        self.pose = msg.pose
-        self.twist = msg.twist
+    def odom_cb(self, msg: Odometry):
+        self.pose = msg.pose.pose
+        self.twist = msg.twist.twist
         self.got_odom = True
 
     def vehicle_attitude_callback(self, msg):
-        # TODO: handle NED->ENU transformation
-        self.vehicle_attitude[0] = msg.q[0]
-        self.vehicle_attitude[1] = msg.q[1]
-        self.vehicle_attitude[2] = -msg.q[2]
-        self.vehicle_attitude[3] = -msg.q[3]
+        # NED-> ENU transformation
+        # Receives quaternion in NED frame as (qw, qx, qy, qz)
+        q_ned = np.array([msg.q[0], msg.q[1], msg.q[2], msg.q[3]])
+        q_enu = self.q_ned_to_q_enu(q_ned)
+        self.vehicle_attitude = q_enu
+
+    def q_ned_to_q_enu(self, q_ned):
+        # Convert NED quaternion to ENU quaternion
+        q_enu = 1/np.sqrt(2) * np.array([q_ned[0] + q_ned[3], q_ned[1] + q_ned[2], q_ned[1] - q_ned[2], q_ned[0] - q_ned[3]])
+        q_enu /= np.linalg.norm(q_enu)
+        return q_enu.astype(float)
+    
+    def q_enu_to_q_ned(self, q_enu):
+        # Convert ENU quaternion to NED quaternion
+        q_ned = 1/np.sqrt(2) * np.array([q_enu[0] + q_enu[3], q_enu[1] + q_enu[2], q_enu[1] - q_enu[2], q_enu[0] - q_enu[3]])
+        q_ned /= np.linalg.norm(q_ned)
+        return q_ned.astype(float)
 
     def vehicle_local_position_callback(self, msg):
-        # TODO: handle NED->ENU transformation
-        self.vehicle_local_position[0] = msg.x
-        self.vehicle_local_position[1] = -msg.y
+        # NED-> ENU transformation
+        self.vehicle_local_position[0] = msg.y
+        self.vehicle_local_position[1] = msg.x
         self.vehicle_local_position[2] = -msg.z
-        self.vehicle_local_velocity[0] = msg.vx
-        self.vehicle_local_velocity[1] = -msg.vy
+        self.vehicle_local_velocity[0] = msg.vy
+        self.vehicle_local_velocity[1] = msg.vx
         self.vehicle_local_velocity[2] = -msg.vz
 
+    def vector2PoseMsg(self, frame_id, position, attitude):
+        pose_msg = PoseStamped()
+        pose_msg.header.stamp = self.get_clock().now().to_msg()
+        pose_msg.header.frame_id = frame_id
+        pose_msg.pose.orientation.w = attitude[0]
+        pose_msg.pose.orientation.x = attitude[1]
+        pose_msg.pose.orientation.y = attitude[2]
+        pose_msg.pose.orientation.z = attitude[3]
+        pose_msg.pose.position.x = float(position[0])
+        pose_msg.pose.position.y = float(position[1])
+        pose_msg.pose.position.z = float(position[2])
+        return pose_msg
 
 def main(args=None):
     rclpy.init(args=args)
