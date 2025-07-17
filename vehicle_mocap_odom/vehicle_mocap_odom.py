@@ -87,7 +87,7 @@ class MyPublisher(Node):
             q_ned = self.q_enu_to_q_ned([self.pose.orientation.w, self.pose.orientation.x, self.pose.orientation.y, self.pose.orientation.z])
             msg.q = [q_ned[0], q_ned[1], q_ned[2], q_ned[3]]
             msg.velocity = [self.twist.linear.y, self.twist.linear.x, -self.twist.linear.z]
-            msg.angular_velocity = [self.twist.angular.y, self.twist.angular.x, -self.twist.angular.z]
+            msg.angular_velocity = [self.twist.angular.x, -self.twist.angular.y, -self.twist.angular.z]
 
             self.publisher_.publish(msg)
 
