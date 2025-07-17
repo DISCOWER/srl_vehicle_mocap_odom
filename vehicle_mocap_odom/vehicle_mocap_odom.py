@@ -73,20 +73,28 @@ class MyPublisher(Node):
             msg = VehicleOdometry()
 
             # Set time
-            time_s, time_ns = self.get_clock().now().seconds_nanoseconds()
-            time_us = (time_s * 1000000) + (time_ns / 1000)
-            msg.timestamp = int(time_us)
-            msg.timestamp_sample = int(time_us)
+            time_us = int(self.get_clock().now().nanoseconds / 1000)
+            msg.timestamp = time_us 
+            msg.timestamp_sample = time_us
 
-            # Set frames
+            # Build the message
+            # Here we convert frames from mocap's /odom to PX4's /vehicle_visual_odometry
+            
+            # Set the frames
             msg.pose_frame = VehicleOdometry.POSE_FRAME_NED
-            msg.velocity_frame = VehicleOdometry.POSE_FRAME_NED
-
-            # Convert Odom pose from ENU to NED and publish
+            msg.velocity_frame = VehicleOdometry.VELOCITY_FRAME_BODY_FRD
+            
+            # Position in global NED frame
             msg.position = [self.pose.position.y, self.pose.position.x, -self.pose.position.z]
+            
+            # Quaternion (qw, qx, qy, qz) as body FRD frame to global ENU frame
             q_ned = self.q_enu_to_q_ned([self.pose.orientation.w, self.pose.orientation.x, self.pose.orientation.y, self.pose.orientation.z])
             msg.q = [q_ned[0], q_ned[1], q_ned[2], q_ned[3]]
-            msg.velocity = [self.twist.linear.y, self.twist.linear.x, -self.twist.linear.z]
+
+            # Velocity in body FRD frame
+            msg.velocity = [self.twist.linear.x, -self.twist.linear.y, -self.twist.linear.z]
+
+            # Angular velocity in body FRD frame
             msg.angular_velocity = [self.twist.angular.x, -self.twist.angular.y, -self.twist.angular.z]
 
             self.publisher_.publish(msg)
@@ -98,31 +106,40 @@ class MyPublisher(Node):
             self.vehicle_pose_pub.publish(vehicle_pose_msg)
 
     def odom_cb(self, msg: Odometry):
+        # Receives odom message from mocap
+        # Position is in global ENU frame
+        # Quaternion (qw, qx, qy, qz) is in body FLU frame to global ENU frame
+        # Velocity is in body FLU frame
+        # Angular velocity is in body FLU frame
         self.pose = msg.pose.pose
         self.twist = msg.twist.twist
         self.got_odom = True
 
     def vehicle_attitude_callback(self, msg):
-        # NED-> ENU transformation
-        # Receives quaternion in NED frame as (qw, qx, qy, qz)
+        # Receives quaternion in NED frame as (qw, qx, qy, qz) as body frame to global frame
         q_ned = np.array([msg.q[0], msg.q[1], msg.q[2], msg.q[3]])
         q_enu = self.q_ned_to_q_enu(q_ned)
         self.vehicle_attitude = q_enu
 
     def q_ned_to_q_enu(self, q_ned):
         # Convert NED quaternion to ENU quaternion
+        # q is in the form (qw, qx, qy, qz) and describes the rotation from body frame to global frame
+        # Yes, NED <-> ENU  is symmetric
         q_enu = 1/np.sqrt(2) * np.array([q_ned[0] + q_ned[3], q_ned[1] + q_ned[2], q_ned[1] - q_ned[2], q_ned[0] - q_ned[3]])
         q_enu /= np.linalg.norm(q_enu)
         return q_enu.astype(float)
     
     def q_enu_to_q_ned(self, q_enu):
         # Convert ENU quaternion to NED quaternion
+        # q is in the form (qw, qx, qy, qz) and describes the rotation from body frame to global frame
+        # Yes, NED <-> ENU  is symmetric
         q_ned = 1/np.sqrt(2) * np.array([q_enu[0] + q_enu[3], q_enu[1] + q_enu[2], q_enu[1] - q_enu[2], q_enu[0] - q_enu[3]])
         q_ned /= np.linalg.norm(q_ned)
         return q_ned.astype(float)
 
     def vehicle_local_position_callback(self, msg):
         # NED-> ENU transformation
+        # Vehicle Local Position and Vehicle Local Velocity are in global NED frame
         self.vehicle_local_position[0] = msg.y
         self.vehicle_local_position[1] = msg.x
         self.vehicle_local_position[2] = -msg.z
