@@ -13,8 +13,8 @@ class MyPublisher(Node):
         namespace = self.declare_parameter('namespace', '').value
         if namespace == '':
             namespace = socket.gethostname()
-            namespace = re.sub(r'[^a-zA-Z0-9_~{}]', '_', namespace)        
-        
+            namespace = re.sub(r'[^a-zA-Z0-9_~{}]', '_', namespace)
+
         # QoS profiles
         qos_profile_pub = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -39,7 +39,7 @@ class MyPublisher(Node):
             f"/{namespace}/mocap_log/vehicle_pose",
             10
         )
-        
+
         self.odom_sub = self.create_subscription(Odometry,
             f"/{namespace}/odom",
             self.odom_cb,
@@ -73,20 +73,19 @@ class MyPublisher(Node):
             msg = VehicleOdometry()
 
             # Set time
-            time_us = int(self.get_clock().now().nanoseconds / 1000)
-            msg.timestamp = time_us 
-            msg.timestamp_sample = time_us
+            msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+            msg.timestamp_sample = int(self.odom_time.nanoseconds / 1000)
 
             # Build the message
             # Here we convert frames from mocap's /odom to PX4's /vehicle_visual_odometry
-            
+
             # Set the frames
             msg.pose_frame = VehicleOdometry.POSE_FRAME_NED
             msg.velocity_frame = VehicleOdometry.VELOCITY_FRAME_BODY_FRD
-            
+
             # Position in global NED frame
             msg.position = [self.pose.position.y, self.pose.position.x, -self.pose.position.z]
-            
+
             # Quaternion (qw, qx, qy, qz) as body FRD frame to global ENU frame
             q_ned = self.q_enu_to_q_ned([self.pose.orientation.w, self.pose.orientation.x, self.pose.orientation.y, self.pose.orientation.z])
             msg.q = [q_ned[0], q_ned[1], q_ned[2], q_ned[3]]
@@ -113,6 +112,7 @@ class MyPublisher(Node):
         # Angular velocity is in body FLU frame
         self.pose = msg.pose.pose
         self.twist = msg.twist.twist
+        self.odom_time = self.get_clock().now()
         self.got_odom = True
 
     def vehicle_attitude_callback(self, msg):
@@ -128,7 +128,7 @@ class MyPublisher(Node):
         q_enu = 1/np.sqrt(2) * np.array([q_ned[0] + q_ned[3], q_ned[1] + q_ned[2], q_ned[1] - q_ned[2], q_ned[0] - q_ned[3]])
         q_enu /= np.linalg.norm(q_enu)
         return q_enu.astype(float)
-    
+
     def q_enu_to_q_ned(self, q_enu):
         # Convert ENU quaternion to NED quaternion
         # q is in the form (qw, qx, qy, qz) and describes the rotation from body frame to global frame
