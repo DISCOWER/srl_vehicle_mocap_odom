@@ -16,7 +16,13 @@ class MyPublisher(Node):
             namespace = re.sub(r'[^a-zA-Z0-9_~{}]', '_', namespace)        
         
         # QoS profiles
-        qos_profile = QoSProfile(
+        qos_fmu_in = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        qos_fmu_out = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
             history=QoSHistoryPolicy.KEEP_LAST,
@@ -24,7 +30,7 @@ class MyPublisher(Node):
         )
         self.publisher_ = self.create_publisher(VehicleOdometry,
             f"/{namespace}/fmu/in/vehicle_visual_odometry",
-            qos_profile
+            qos_fmu_in
         )
         self.odom_sub = self.create_subscription(Odometry,
             f"/{namespace}/odom",
